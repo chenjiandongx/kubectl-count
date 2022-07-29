@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"k8s.io/klog/v2"
 	"os"
 	"sort"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -75,80 +75,81 @@ func init() {
 
 type Record struct {
 	Namespace    string `json:"namespace" yaml:"namespace"`
-	Kind         string `json:"kind" yaml:"kind"`
 	GroupVersion string `json:"groupVersion" yaml:"groupVersion"`
+	Kind         string `json:"kind" yaml:"kind"`
 	Count        int    `json:"count" yaml:"count"`
 }
 
-type KindNamespaceMap struct {
-	lock  sync.Mutex
-	m     map[string]map[string]int
-	kinds []string
-	gvs   map[string]string
+type IDMap struct {
+	lock sync.Mutex
+	m    map[string]map[string]int
+	ids  []string
 }
 
-func NewKindNamespaceMap() *KindNamespaceMap {
-	return &KindNamespaceMap{
-		m:   map[string]map[string]int{},
-		gvs: map[string]string{},
+func NewIDMap() *IDMap {
+	return &IDMap{
+		m: map[string]map[string]int{},
 	}
 }
 
-func (kn *KindNamespaceMap) Add(kind, namespace string) {
-	kn.lock.Lock()
-	defer kn.lock.Unlock()
-
-	if _, ok := kn.m[kind]; !ok {
-		kn.m[kind] = map[string]int{}
-	}
-	kn.m[kind][namespace]++
+func (idm *IDMap) KindGroupVersion(id string) (string, string) {
+	parts := strings.Split(id, "+")
+	return parts[0], parts[1]
 }
 
-func (kn *KindNamespaceMap) Del(kind, namespace string) {
-	kn.lock.Lock()
-	defer kn.lock.Unlock()
+func (idm *IDMap) Add(id, namespace string) {
+	idm.lock.Lock()
+	defer idm.lock.Unlock()
 
-	if _, ok := kn.m[kind]; !ok {
+	if _, ok := idm.m[id]; !ok {
+		idm.m[id] = map[string]int{}
+	}
+	idm.m[id][namespace]++
+}
+
+func (idm *IDMap) Del(id, namespace string) {
+	idm.lock.Lock()
+	defer idm.lock.Unlock()
+
+	if _, ok := idm.m[id]; !ok {
 		return
 	}
-	kn.m[kind][namespace]--
+	idm.m[id][namespace]--
 }
 
-func (kn *KindNamespaceMap) AddKind(k, gv string) {
-	kn.lock.Lock()
-	defer kn.lock.Unlock()
-
-	kn.kinds = append(kn.kinds, k)
-	kn.gvs[k] = gv
+func (idm *IDMap) AddID(id string) {
+	idm.ids = append(idm.ids, id)
 }
 
-func (kn *KindNamespaceMap) GetRecords(order string, allNamespace bool) []Record {
-	kn.lock.Lock()
-	defer kn.lock.Unlock()
+func (idm *IDMap) GetRecords(order string, allNamespace bool) []Record {
+	idm.lock.Lock()
+	defer idm.lock.Unlock()
 
 	records := map[string][]Record{}
-	for kind, counter := range kn.m {
+	for id, counter := range idm.m {
+		kind, groupVersion := idm.KindGroupVersion(id)
 		rs := make([]Record, 0)
 		for ns, c := range counter {
 			rs = append(rs, Record{
 				Namespace:    ns,
 				Kind:         kind,
-				GroupVersion: kn.gvs[kind],
+				GroupVersion: groupVersion,
 				Count:        c,
 			})
 		}
-		records[kind] = rs
+		records[id] = rs
 	}
 
 	tmp := map[string][]Record{}
 	if allNamespace {
-		for kind, counter := range records {
+		for id, counter := range records {
+			kind, _ := idm.KindGroupVersion(id)
 			r := Record{Kind: kind}
 			for _, c := range counter {
 				r.Count += c.Count
 				r.GroupVersion = c.GroupVersion
 			}
-			tmp[kind] = []Record{r}
+			tmp[id] = []Record{r}
 		}
 		records = tmp
 	}
@@ -170,8 +171,8 @@ func (kn *KindNamespaceMap) GetRecords(order string, allNamespace bool) []Record
 	}
 
 	ret := make([]Record, 0)
-	for _, k := range kn.kinds {
-		ret = append(ret, records[k]...)
+	for _, id := range idm.ids {
+		ret = append(ret, records[id]...)
 	}
 	return ret
 }
@@ -222,28 +223,28 @@ func (cc *CounterController) sanitizeKinds(s string) []string {
 	return kinds
 }
 
-func (cc *CounterController) list(s string) (*KindNamespaceMap, error) {
+func (cc *CounterController) list(s string) (*IDMap, error) {
 	kinds := cc.sanitizeKinds(s)
 	if len(kinds) == 0 {
 		return nil, fmt.Errorf("invalid input kind name: '%s'", s)
 	}
 
-	apiResources, gvs, err := cc.getApiResources()
+	apiResources, err := cc.getApiResources()
 	if err != nil {
 		return nil, err
 	}
 
-	kindNamespaceMap := NewKindNamespaceMap()
+	idMap := NewIDMap()
 	informers := map[string]cache.SharedIndexInformer{}
 	for _, kind := range kinds {
 		if ars, ok := apiResources[kind]; ok {
 			for _, ar := range ars {
-				informers[ar.Kind] = cc.factory.ForResource(schema.GroupVersionResource{
-					Group:    ar.Group,
-					Version:  ar.Version,
-					Resource: ar.Name,
+				informers[ar.ID()] = cc.factory.ForResource(schema.GroupVersionResource{
+					Group:    ar.resource.Group,
+					Version:  ar.resource.Version,
+					Resource: ar.resource.Name,
 				}).Informer()
-				kindNamespaceMap.AddKind(ar.Kind, gvs[ar.Kind])
+				idMap.AddID(ar.ID())
 			}
 		}
 	}
@@ -252,8 +253,8 @@ func (cc *CounterController) list(s string) (*KindNamespaceMap, error) {
 		return nil, errors.New("no available informers found")
 	}
 
-	for kind, informer := range informers {
-		k := kind
+	for id, informer := range informers {
+		cloned := id
 		informer.SetWatchErrorHandler(func(r *cache.Reflector, err error) {})
 		informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
@@ -261,14 +262,14 @@ func (cc *CounterController) list(s string) (*KindNamespaceMap, error) {
 				if !ok {
 					return
 				}
-				kindNamespaceMap.Add(k, o.GetNamespace())
+				idMap.Add(cloned, o.GetNamespace())
 			},
 			DeleteFunc: func(obj interface{}) {
 				o, ok := obj.(*unstructured.Unstructured)
 				if !ok {
 					return
 				}
-				kindNamespaceMap.Del(k, o.GetNamespace())
+				idMap.Del(cloned, o.GetNamespace())
 			},
 		})
 		go informer.Run(cc.ctx.Done())
@@ -281,44 +282,52 @@ func (cc *CounterController) list(s string) (*KindNamespaceMap, error) {
 	}
 
 	cc.cancel()
-	return kindNamespaceMap, nil
+	return idMap, nil
 }
 
-func (cc *CounterController) getApiResources() (map[string][]v1.APIResource, map[string]string, error) {
+type APIResourceGV struct {
+	resource     v1.APIResource
+	groupVersion string
+}
+
+func (agv APIResourceGV) ID() string {
+	return agv.resource.Kind + "+" + agv.groupVersion
+}
+
+func (cc *CounterController) getApiResources() (map[string][]APIResourceGV, error) {
 	resources, _ := cc.discoveryClient.ServerPreferredResources()
-	rm := make(map[string][]v1.APIResource)
-	gvs := make(map[string]string)
+	rm := make(map[string][]APIResourceGV)
 	for _, resource := range resources {
 		gv, err := schema.ParseGroupVersion(resource.GroupVersion)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		for _, r := range resource.APIResources {
 			cloned := r
 			cloned.Group = gv.Group
 			cloned.Version = gv.Version
-			gvs[r.Kind] = resource.GroupVersion
+			agv := APIResourceGV{resource: cloned, groupVersion: resource.GroupVersion}
 
 			keys := []string{r.Name, strings.ToLower(r.Kind), fmt.Sprintf("%s.%s", r.Name, gv.Group)}
 			for _, key := range keys {
-				rm[key] = append(rm[key], cloned)
+				rm[key] = append(rm[key], agv)
 			}
 
 			for _, shortName := range r.ShortNames {
-				rm[shortName] = append(rm[shortName], cloned)
+				rm[shortName] = append(rm[shortName], agv)
 			}
 			if r.SingularName != "" {
-				rm[r.SingularName] = append(rm[r.SingularName], cloned)
+				rm[r.SingularName] = append(rm[r.SingularName], agv)
 			}
 		}
 	}
 
-	return rm, gvs, nil
+	return rm, nil
 }
 
 func (cc *CounterController) tableRender(records []Record) {
-	headers := []string{"Namespace", "Kind", "GroupVersion", "Count"}
+	headers := []string{"Namespace", "GroupVersion", "Kind", "Count"}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader(headers)
 	table.SetAutoFormatHeaders(false)
@@ -326,7 +335,7 @@ func (cc *CounterController) tableRender(records []Record) {
 	table.SetRowLine(true)
 
 	for _, record := range records {
-		table.Append([]string{record.Namespace, record.Kind, record.GroupVersion, strconv.Itoa(record.Count)})
+		table.Append([]string{record.Namespace, record.GroupVersion, record.Kind, strconv.Itoa(record.Count)})
 	}
 	table.Render()
 }
@@ -350,13 +359,13 @@ func (cc *CounterController) yamlRender(records []Record) {
 }
 
 func (cc *CounterController) Render(kinds, order, output string, allNamespace bool) {
-	kn, err := cc.list(kinds)
+	idMap, err := cc.list(kinds)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[Oh...] Failed to list resources, error: %v", err)
 		os.Exit(1)
 	}
 
-	records := kn.GetRecords(order, allNamespace)
+	records := idMap.GetRecords(order, allNamespace)
 	if len(records) <= 0 {
 		fmt.Fprintln(os.Stdout, "[Oh...] No Resources found!")
 		os.Exit(1)
