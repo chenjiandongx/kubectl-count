@@ -3,7 +3,7 @@
   <em>🎊 Show resources count in the cluster.</em>
 </p>
 
-kubectl-count uses the dynamic library to found server preferred resources and then leverages informer mechanism to list resources.
+kubectl-count uses the dynamic library to found server preferred resources and then leverages informer mechanism to list and count resources.
 
 ### 🔰 Installation
 
