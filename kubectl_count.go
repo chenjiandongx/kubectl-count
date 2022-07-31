@@ -30,7 +30,7 @@ import (
 
 const (
 	resyncPeriod = time.Minute * 5
-	version      = "0.1.0"
+	version      = "0.1.1"
 )
 
 var cf = genericclioptions.NewConfigFlags(true)
