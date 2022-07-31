@@ -30,7 +30,7 @@ import (
 
 const (
 	resyncPeriod = time.Minute * 5
-	version      = "0.2.5"
+	version      = "0.2.6"
 )
 
 var cf = genericclioptions.NewConfigFlags(true)
@@ -40,11 +40,11 @@ var rootCmd *cobra.Command
 func init() {
 	rootCmd = &cobra.Command{
 		Use:   "kubectl-count <kinds>",
-		Short: "Show resources count in the cluster.",
-		Example: `  # display a table of specified resources count, resources split by comma.
+		Short: "Count resources by kind.",
+		Example: `  # display a table of specified resources counts, kinds split by comma.
   kubectl count pods,ds,deploy
 
-  # display kube-system cluster count info in yaml format.
+  # display kube-system namespace resources counts info in yaml format.
   kubectl count -oy -n kube-system rs,ep`,
 		Version: version,
 		Args:    cobra.MinimumNArgs(1),

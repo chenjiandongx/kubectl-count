@@ -1,9 +1,9 @@
 <h1 align="center">kubectl-count</h1>
 <p align="center">
-  <em>🎊 Show resources count in the cluster.</em>
+  <em>🎊 Count resources by kind.</em>
 </p>
 
-kubectl-count uses the dynamic library to found server preferred resources and then leverages informer mechanism to list and count resources.
+kubectl-count uses the dynamic library to found server preferred resources and then leverages informer mechanism to list and count resources by kind.
 
 ### 🔰 Installation
 
@@ -28,16 +28,16 @@ $ kubectl count --help
 
 ```shell
 ~ 🐶 kubectl count --help
-Show resources count in the cluster.
+Count resources by kind.
 
 Usage:
   kubectl-count <kinds> [flags]
 
 Examples:
-  # display a table of specified resources count, resources split by comma.
+  # display a table of specified resources counts, kinds split by comma.
   kubectl count pods,ds,deploy
 
-  # display kube-system cluster count info in yaml format.
+  # display kube-system namespace resources counts info in yaml format.
   kubectl count -oy -n kube-system rs,ep
 
 Flags:
@@ -94,36 +94,36 @@ Flags:
 
 ~ 🐶 kubectl count service,ds,rs -oy -A
 - namespace: ""
-  kind: Service
   groupVersion: v1
+  kind: Service
   count: 237
 - namespace: ""
-  kind: DaemonSet
   groupVersion: apps/v1
+  kind: DaemonSet
   count: 11
 - namespace: ""
-  kind: ReplicaSet
   groupVersion: apps/v1
+  kind: ReplicaSet
   count: 1585
 
 ~ 🐶 kubectl count service,ds,rs -oj -A
 [
  {
   "namespace": "",
-  "kind": "Service",
   "groupVersion": "v1",
+  "kind": "Service",
   "count": 237
  },
  {
   "namespace": "",
-  "kind": "DaemonSet",
   "groupVersion": "apps/v1",
+  "kind": "DaemonSet"
   "count": 11
  },
  {
   "namespace": "",
-  "kind": "ReplicaSet",
   "groupVersion": "apps/v1",
+  "kind": "ReplicaSet",
   "count": 1585
  }
 ]
