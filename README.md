@@ -3,9 +3,24 @@
   <em>🎊 Count resources by kind.</em>
 </p>
 
-kubectl-count uses the dynamic library to found server preferred resources and then leverages informer mechanism to list and count resources by kind.
+kubectl-count uses the dynamic library to find server preferred resources and then leverages the informer mechanism to list and count resources by kind. You can show any kinds counts in kubernetes and group by namespaces.
 
 ### 🔰 Installation
+
+Krew
+
+```shell
+$ kubectl krew install count
+Updated the local copy of plugin index.
+Installing plugin: count
+Installed plugin: count
+\
+ | Use this plugin:
+ | 	kubectl count
+ | Documentation:
+ | 	https://github.com/chenjiandongx/kubectl-count
+/
+```
 
 Build from source code
 
